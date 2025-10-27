@@ -14,11 +14,11 @@ struct args{
     Mat *source;
     Mat *dest;
     int startIndex;
+    int endIndex;
 
 };
 
 void* graySobel(void*);
-pthread_barrier_t barrierA, barrierB;
 
 int main(int argc, char **argv){
     //ensure number of arguments are correct
@@ -26,6 +26,7 @@ int main(int argc, char **argv){
         cout << "Error: Invalid input" << endl;
         return 0;
     }
+
     string videoPath = argv[1];
     VideoCapture cap(videoPath);
 
@@ -33,13 +34,30 @@ int main(int argc, char **argv){
         perror("Error: Could not open video file.");
         return 0;
     }
+    pthread_t threads[4];
+    struct args thr_args[4];
+    Mat src, dest;
+    uint8_t dest_create = 0;
 
-    Mat frame;
-    while (cap.read(frame)){
-        flip(frame, frame, -1);
-        
-        // imshow("gImage", );
-        // waitKey(1);
+    while (cap.read(src)){
+        flip(src, src, -1);
+        if (!dest_create){
+            dest.create(src.rows, src.cols, CV_8UC1);
+            dest_create = 1;
+        }
+        // create pthread + arguments
+        for (int i = 0; i < 4; i++){
+            thr_args[i].source = &src;
+            thr_args[i].dest = &dest;
+            thr_args[i].startIndex = src.rows*i/4;
+            thr_args[i].endIndex = src.rows*(i+1)/4;
+            pthread_create(&threads[i], NULL, graySobel, (void *) &thr_args[i]);
+        }
+        for (int i = 0; i < 4; i++){
+            pthread_join(threads[i], NULL);
+        }
+        imshow("sImage", dest);
+        waitKey(1);
     }
 
     return 0;
@@ -48,7 +66,7 @@ int main(int argc, char **argv){
 void* graySobel(void *arg){
     struct args *arguments = static_cast<struct args*>(arg);
     int16_t xTotal, yTotal, g11, g12, g13, g21, g23, g31, g32, g33, total;
-    for (int r = arguments->startIndex; r < arguments->source->rows; r++){
+    for (int r = arguments->startIndex; r < arguments->endIndex; r++){
         Vec3b *tRow, *mRow, *bRow;
         uchar *sRow;
         if ((r-1) < 0)
@@ -63,9 +81,9 @@ void* graySobel(void *arg){
         mRow = arguments->source->ptr<Vec3b>(r);
         sRow = arguments->dest->ptr<uchar>(r);
 
-        for (int c = 0; c < arguments->source->rows; c++){
+        for (int c = 0; c < arguments->source->cols; c++){
             // just perform grayscale on edge cases
-            if (tRow == NULL || bRow == NULL || c == 0 || c == arguments->source->cols){
+            if (tRow == NULL || bRow == NULL || c == 0 || c == arguments->source->cols-1){
                 sRow[c] = mRow[c][0]*0.0722 + mRow[c][1]*0.7152 + mRow[c][2]*0.2126;
             }
             else{
@@ -85,10 +103,7 @@ void* graySobel(void *arg){
                 total = (total > 255) ? 255 : ((total < 0) ? 0 : total);
                 sRow[c] = total;
             }
-            
-
-
         }
     }
-
-};
+    pthread_exit(0);
+}
